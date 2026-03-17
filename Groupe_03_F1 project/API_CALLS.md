@@ -49,3 +49,7 @@ curl "https://api.jolpi.ca/ergast/f1/constructors/mclaren.json"
 ```bash
 curl -s "https://api.jolpi.ca/ergast/f1/2024/driverStandings.json?limit=30" | jq .
 ```
+
+ cd "Groupe_03_F1 project"                                                                                                    
+  python3 -m http.server 8080                                                                                                  
+  Then open http://localhost:8080/dashboard.html  

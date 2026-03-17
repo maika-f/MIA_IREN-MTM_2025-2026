@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>F1 Paddock Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <style>
         :root {
             --f1-red: #E10600;
@@ -414,6 +415,17 @@
             height: 8px;
         }
 
+        /* Chart containers */
+        .chart-container {
+            padding: 20px;
+            position: relative;
+            height: 350px;
+        }
+
+        .chart-container canvas {
+            max-height: 100%;
+        }
+
         /* Responsive */
         @media (max-width: 900px) {
             .grid-2 { grid-template-columns: 1fr; }
@@ -449,6 +461,7 @@
     <div class="nav-tab" data-tab="constructors">Constructors</div>
     <div class="nav-tab" data-tab="calendar">Calendar</div>
     <div class="nav-tab" data-tab="lastrace">Last Race</div>
+    <div class="nav-tab" data-tab="charts">Charts</div>
 </nav>
 
 <main class="main">
@@ -534,12 +547,42 @@
         </div>
     </div>
 
+    <!-- CHARTS TAB -->
+    <div class="tab-content" id="tab-charts">
+        <div class="grid-2">
+            <div class="card">
+                <div class="card-header"><span class="icon">&#128202;</span> Driver Points — Top 10</div>
+                <div class="card-body chart-container">
+                    <canvas id="chartDriverPoints"></canvas>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="icon">&#127856;</span> Constructor Points Share</div>
+                <div class="card-body chart-container">
+                    <canvas id="chartConstructorDonut"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="grid-2">
+            <div class="card">
+                <div class="card-header"><span class="icon">&#127942;</span> Race Wins by Driver</div>
+                <div class="card-body chart-container">
+                    <canvas id="chartWins"></canvas>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="icon">&#127937;</span> Last Race — Points Scored</div>
+                <div class="card-body chart-container">
+                    <canvas id="chartLastRace"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </main>
 
+<script src="api.js"></script>
 <script>
-const API_BASE = 'https://api.jolpi.ca/ergast/f1';
-const SEASON = '2024';
-
 // Team colors
 const TEAM_COLORS = {
     'red_bull': '#3671C6', 'ferrari': '#E8002D', 'mclaren': '#FF8000',
@@ -552,11 +595,6 @@ function getTeamColor(constructorId) {
     return TEAM_COLORS[constructorId] || '#E10600';
 }
 
-async function fetchJSON(endpoint) {
-    const res = await fetch(`${API_BASE}${endpoint}`);
-    return res.json();
-}
-
 function formatDate(dateStr) {
     const d = new Date(dateStr);
     return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -566,7 +604,6 @@ function formatDate(dateStr) {
 
 function renderDriversTable(drivers, containerId, limit) {
     const list = limit ? drivers.slice(0, limit) : drivers;
-    const maxPts = parseFloat(drivers[0]?.points) || 1;
     let html = `<table>
         <thead><tr><th>Pos</th><th>Driver</th><th>Team</th><th>Points</th><th>Wins</th></tr></thead>
         <tbody>`;
@@ -653,6 +690,181 @@ function renderLastRace(race) {
     document.getElementById('lastRaceTable').innerHTML = html;
 }
 
+// --- Chart rendering ---
+
+function renderCharts(drivers, constructors, lastRace) {
+    const chartDefaults = {
+        color: '#888888',
+        borderColor: '#333333',
+    };
+    Chart.defaults.color = chartDefaults.color;
+    Chart.defaults.borderColor = chartDefaults.borderColor;
+
+    // 1) Driver Points — Horizontal bar (top 10)
+    const top10 = drivers.slice(0, 10);
+    new Chart(document.getElementById('chartDriverPoints'), {
+        type: 'bar',
+        data: {
+            labels: top10.map(d => d.Driver.code || d.Driver.familyName),
+            datasets: [{
+                label: 'Points',
+                data: top10.map(d => parseFloat(d.points)),
+                backgroundColor: top10.map(d => getTeamColor(d.Constructors[0]?.constructorId) + 'CC'),
+                borderColor: top10.map(d => getTeamColor(d.Constructors[0]?.constructorId)),
+                borderWidth: 1,
+                borderRadius: 4,
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        title: (items) => {
+                            const d = top10[items[0].dataIndex];
+                            return `${d.Driver.givenName} ${d.Driver.familyName}`;
+                        },
+                        afterLabel: (item) => `Team: ${top10[item.dataIndex].Constructors[0]?.name}`
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { color: 'rgba(255,255,255,0.05)' },
+                    ticks: { font: { family: 'Orbitron', size: 10 } }
+                },
+                y: {
+                    grid: { display: false },
+                    ticks: { font: { family: 'Orbitron', size: 11, weight: 'bold' } }
+                }
+            }
+        }
+    });
+
+    // 2) Constructor Points — Doughnut
+    new Chart(document.getElementById('chartConstructorDonut'), {
+        type: 'doughnut',
+        data: {
+            labels: constructors.map(c => c.Constructor.name),
+            datasets: [{
+                data: constructors.map(c => parseFloat(c.points)),
+                backgroundColor: constructors.map(c => getTeamColor(c.Constructor.constructorId) + 'CC'),
+                borderColor: constructors.map(c => getTeamColor(c.Constructor.constructorId)),
+                borderWidth: 2,
+                hoverOffset: 8,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '55%',
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: {
+                        padding: 12,
+                        usePointStyle: true,
+                        pointStyleWidth: 12,
+                        font: { family: 'Roboto', size: 11 }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: (item) => ` ${item.label}: ${item.raw} pts (${constructors[item.dataIndex].wins} wins)`
+                    }
+                }
+            }
+        }
+    });
+
+    // 3) Wins by Driver — Bar chart (only drivers with wins)
+    const winners = drivers.filter(d => parseInt(d.wins) > 0);
+    new Chart(document.getElementById('chartWins'), {
+        type: 'bar',
+        data: {
+            labels: winners.map(d => d.Driver.code || d.Driver.familyName),
+            datasets: [{
+                label: 'Wins',
+                data: winners.map(d => parseInt(d.wins)),
+                backgroundColor: winners.map(d => getTeamColor(d.Constructors[0]?.constructorId) + 'CC'),
+                borderColor: winners.map(d => getTeamColor(d.Constructors[0]?.constructorId)),
+                borderWidth: 1,
+                borderRadius: 4,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        title: (items) => {
+                            const d = winners[items[0].dataIndex];
+                            return `${d.Driver.givenName} ${d.Driver.familyName}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { font: { family: 'Orbitron', size: 11, weight: 'bold' } }
+                },
+                y: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(255,255,255,0.05)' },
+                    ticks: { stepSize: 1, font: { family: 'Orbitron', size: 10 } }
+                }
+            }
+        }
+    });
+
+    // 4) Last Race — Points scored (top 10)
+    const top10Race = lastRace.Results.filter(r => parseFloat(r.points) > 0);
+    new Chart(document.getElementById('chartLastRace'), {
+        type: 'polarArea',
+        data: {
+            labels: top10Race.map(r => r.Driver.code || r.Driver.familyName),
+            datasets: [{
+                data: top10Race.map(r => parseFloat(r.points)),
+                backgroundColor: top10Race.map(r => getTeamColor(r.Constructor.constructorId) + '99'),
+                borderColor: top10Race.map(r => getTeamColor(r.Constructor.constructorId)),
+                borderWidth: 2,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: {
+                        padding: 10,
+                        usePointStyle: true,
+                        pointStyleWidth: 12,
+                        font: { family: 'Roboto', size: 11 }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: (item) => ` ${item.label}: P${top10Race[item.dataIndex].position} — ${item.raw} pts`
+                    }
+                }
+            },
+            scales: {
+                r: {
+                    grid: { color: 'rgba(255,255,255,0.08)' },
+                    ticks: { display: false }
+                }
+            }
+        }
+    });
+}
+
 // --- Tab navigation ---
 document.querySelectorAll('.nav-tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -666,17 +878,7 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
 // --- Fetch and render all data ---
 async function init() {
     try {
-        const [driverData, constructorData, calendarData, lastRaceData] = await Promise.all([
-            fetchJSON(`/${SEASON}/driverStandings.json?limit=30`),
-            fetchJSON(`/${SEASON}/constructorStandings.json?limit=15`),
-            fetchJSON(`/${SEASON}.json?limit=30`),
-            fetchJSON(`/${SEASON}/last/results.json?limit=25`),
-        ]);
-
-        const drivers = driverData.MRData.StandingsTable.StandingsLists[0].DriverStandings;
-        const constructors = constructorData.MRData.StandingsTable.StandingsLists[0].ConstructorStandings;
-        const races = calendarData.MRData.RaceTable.Races;
-        const lastRace = lastRaceData.MRData.RaceTable.Races[0];
+        const { drivers, constructors, races, lastRace } = await fetchAllData();
 
         // Overview stats
         document.getElementById('statChampion').textContent = drivers[0].Driver.familyName.toUpperCase();
@@ -695,6 +897,7 @@ async function init() {
         renderConstructorsTable(constructors, 'constructorsTable');
         renderCalendar(races);
         renderLastRace(lastRace);
+        renderCharts(drivers, constructors, lastRace);
 
     } catch (err) {
         console.error('Error loading F1 data:', err);
